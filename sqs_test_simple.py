@@ -11,6 +11,11 @@ def get_queue(sqs, name):
   queue = sqs.get_queue_by_name(QueueName=name)
   return queue
 
+def delete_queue(sqs, name):
+  queue = get_queue(sqs, name)
+  client = boto3.client('sqs')
+  client.delete_queue(QueueUrl=queue.url)
+
 def send_message(queue, message, attributes={}):
   response = queue.send_message(MessageBody=message, MessageAttributes=attributes)
   return response
@@ -21,8 +26,8 @@ def generate_message_batch(batch_size, id_start=0):
   for i in range(batch_size):
     message = {
         'Id': str(id_start + i),
-        'MessageBody': 'hey, this is message: {}.'.format(i),
-        'MessageAttributes': {'Author': {'StringValue': 'alex-walczak', 'DataType': 'String'}}
+        'MessageBody': 'ME$$AGE: {}.'.format(id_start + i),
+        'MessageAttributes': {'Author': {'StringValue': 'Donald Trump', 'DataType': 'String'}}
     }
     batch.append(message)
   return batch
@@ -46,9 +51,16 @@ def send_messages(queue, messages, single_batch=True):
     responses.append(response)
   return responses
 
-def process_messages(queue, process_fn):
-  for message in queue.receive_messages(AttributeNames=['All'], MessageAttributeNames=['Author']):
+def process_messages(queue, process_fn, attributes=[]):
+  x = 0
+  for message in queue.receive_messages(
+          AttributeNames=['All'],
+          MaxNumberOfMessages=10,
+          WaitTimeSeconds=10,
+          MessageAttributeNames=attributes):
     process_fn(message)
+    x += 1
+  return x
 
 def sample_message_process_fn(message):
   # Get the custom author message attribute if it was set
@@ -56,44 +68,51 @@ def sample_message_process_fn(message):
   if message.message_attributes is not None:
       author_text = message.message_attributes.get('Author').get('StringValue')
   # Print out the body and author (if set)
-  print('Sup, {}? ------ {}'.format(author_text, message.body))
-
-
-# FOR FUNSIES:
-
-def _print(message):
-  sys.stdout.write('{}\r'.format(message))
-  sys.stdout.flush()
-
-def sleeping():
-  for i in range(3):
-    _print('Sleeping.  ')
-    time.sleep(1)
-    _print('Sleeping.. ')
-    time.sleep(1)
-    _print('Sleeping...')
-    time.sleep(1)
-    _print('Sleeping.. ')
-    time.sleep(1)
-  print('Sleeping...')
+  print('AUTHOR: {} \t | BODY: {}'.format(author_text, message.body))
+  # Let queue know message is processed
+  message.delete()
 
 
 if __name__ == '__main__':
   # python3 file.py QUEUE_NAME
   sqs = boto3.resource('sqs')
   name = sys.argv[1]
+
+  send = False
+  if len(sys.argv) > 2:
+    send = sys.argv[2]
+    send = True if send == 'yes' else False
+
   print('Creating queue...')
   q = create_queue(sqs, name)
   print(q.url)
   print(q.attributes.get('DelaySeconds'))
 
   q = get_queue(sqs, name)
+
   print('\nGot queue...\n', q)
 
-  print('\nSending BIG message batch...\n')
-  big_message_batch = generate_message_batches(num_messages=1000)
-  r = send_messages(q, big_message_batch, single_batch=False)
+  if send:
+    print('\nSending BIG message batch...\n')
+    big_message_batch = generate_message_batches(num_messages=200)
+    for batch in big_message_batch:
+        for message in batch:
+            print(message)
+    r = send_messages(q, big_message_batch, single_batch=False)
+    # print('Response\n\n', r)
 
+  # print('\nProcessing BIG message batch...')
+  # process_messages(q, sample_message_process_fn, ['Author'])
+
+  failures = 0
+  count = 0
   print('\nProcessing BIG message batch...')
-  process_messages(q, sample_message_process_fn)
+  while True:
+    x = process_messages(q, sample_message_process_fn, ['Author'])
+    count += x
+    if x == 0:
+      failures += 1
+    if failures > 3:
+      break
+  print('Finished!', 'Failures', failures, 'Messages processed', count)
 
