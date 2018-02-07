@@ -90,7 +90,7 @@ if __name__ == '__main__':
   q = get_queue(sqs, name)
   print('\nGot queue...\n', q)
 
-  print('\nSending BIG message batch...\n', r)
+  print('\nSending BIG message batch...\n')
   big_message_batch = generate_message_batches(num_messages=1000)
   r = send_messages(q, big_message_batch, single_batch=False)
 
